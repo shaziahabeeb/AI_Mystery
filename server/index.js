@@ -1,16 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
 import mongoose from 'mongoose';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { Case } from './models/Case.js';
 import { generateMystery } from './services/generator.js';
 
 const app = express();
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173' }));
 app.use(express.json({ limit: '64kb' }));
 const port = process.env.PORT || 5000;
 const localCases = new Map();
+const distPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist');
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', database: mongoose.connection.readyState === 1 ? 'connected' : 'local fallback' }));
 
@@ -53,6 +54,16 @@ app.post('/api/cases/:id/accusation', async (req, res) => {
     c.accusation = { suspectId: parsed.data.suspectId, submittedAt: new Date() }; if (mongoose.connection.readyState === 1) await c.save(); else localCases.set(req.params.id, c);
     res.json({ suspectId: parsed.data.suspectId, culpritId: c.solution.culpritId, correct: parsed.data.suspectId === c.solution.culpritId, solution: c.solution });
   } catch { res.status(404).json({ message: 'Case not found.' }); }
+});
+
+// Serve the built React app in production. Vite continues to serve the client
+// during development, with /api requests proxied to this server.
+app.use(express.static(distPath));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(distPath, 'index.html'), err => {
+    if (err) next();
+  });
 });
 
 function publicCase(c) { const { solution, _id, __v, ...pub } = c; return { ...pub, id: c.id || String(_id || c.id), solution: undefined }; }
